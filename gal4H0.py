@@ -43,6 +43,20 @@ def normal_distribution(x,mu,sigma):
     var=sigma**2
     return np.power(2*np.pi*var,-0.5)*np.exp(-0.5*np.power((x-mu)/sigma,2.))
 
+def normal_distribution_TH21(x,mu,sigma):
+    '''
+    Reuturns a gaussian likelihood without overall normalization:
+    
+    Parameters
+    ----------
+    x: np.array
+        Where to evaluate likelihood
+    mu,sigma: np.array
+        Mean and standard deviation of gaussian
+    '''
+    var=sigma**2
+    return np.exp(-0.5*np.power((x-mu)/sigma,2.))
+
 def GW_detection_probability(dltrue,sigmadl,dlthr):
     '''
     Return a detection probability given a gaussian likelihood. The detection probability is defined as 
@@ -418,17 +432,18 @@ def galaxy_catalog_analysis_photo_redshift(H0_array,zinterpo,gw_obs_dl,sigma_dl,
         combined/=scipy.integrate.simpson(combined,H0_array)
 
     return posterior_matrix,combined
+                
+                
 
-def galaxy_catalog_analysis_onegal_withuncert(H0_array,zobs,z_uncert,gw_obs_dl,sigma_dl,dl_thr):
+        
+def galaxy_catalog_analysis_photo_redshift_GWlikelihood_inconsistency(H0_array,zinterpo,gw_obs_dl,sigma_dl,dl_thr):
     '''
-    This carries out an analysis with a single galaxy in the catalogue in the 
-    standard way using the approximate likelihood.
+    This function will perform the H0 analysis assuming errors on the redshift determination and no normalization in the luminosity distance
     
     Parameters
     ---------
     H0_array: grid of H0 for the analysis
-    zval: observed redshift of single galaxy
-    z_uncert: fractional uncertainty in redshift measurement, zval ~ N(z_true, z_uncert*z_true)
+    zinterpo: Interpolant for p(z|C)
     gw_obs_dl: Array containing observed values for the GW luminosity distance in Mpc
     sigma_dl: Array of sigma for dl (in Mpc) used to draw gw_obs_dl
     dl_thr: Threshold for detection in Mpc
@@ -440,34 +455,28 @@ def galaxy_catalog_analysis_onegal_withuncert(H0_array,zobs,z_uncert,gw_obs_dl,s
 
     cosmotrial=FlatLambdaCDM(H0=70.,Om0=0.25)
     posterior_matrix = np.ones([len(gw_obs_dl),len(H0_array)])
-    # Evaluate d_L times H0
-    zmin=zobs/(1.+5.*z_uncert)
-    if (zmin < 0.):
-        zmin=0.
-    zmax=zobs/(1.-5.*z_uncert)
-    z_array=np.linspace(zmin,zmax,1000)
-    dltimesH0=cosmotrial.luminosity_distance(z_array).to('Mpc').value*cosmotrial.H0.value
+    # Evaluated d_L times H0
+    dltimesH0=cosmotrial.luminosity_distance(zinterpo.x).to('Mpc').value*cosmotrial.H0.value
     selection_bias=np.zeros_like(H0_array)
-    # Note that there is a normalisation here which we are ignoring because 
-    # it is a constant factor when we have only one galaxy
-    pzeval=(z_array**2)*np.exp(-0.5*((z_array-zobs)**2)/((z_array*z_uncert)))
-
-
+    pzeval=np.exp(zinterpo(zinterpo.x))
+    
+    
     # Calculate the selection effect on the grid just once
     for j,H0 in tqdm(enumerate(H0_array)):
         dltrial=dltimesH0/H0
-        integrand=GW_detection_probability(dltrial,sigmadl=sigma_dl*dltrial,dlthr=dl_thr)*pzeval
-        selection_bias[j]=scipy.integrate.simpson(integrand,z_array)
-
+        integrand=GW_detection_probability_Heaviside(dltrial,dlthr=dl_thr)*pzeval
+        #integrand=GW_detection_probability(dltrial,sigmadl=sigma_dl*dltrial,dlthr=dl_thr)*pzeval
+        selection_bias[j]=scipy.integrate.simpson(integrand,zinterpo.x)
+    
     # Loop on the GW events and H0 to compute posteriors
     for i,idx in tqdm(enumerate(gw_obs_dl),desc='Running on GW events'):
         for j,H0 in enumerate(H0_array):
             dltrial=dltimesH0/H0
-            integrand=normal_distribution(gw_obs_dl[i],mu=dltrial,sigma=sigma_dl*dltrial)*pzeval
+            integrand=normal_distribution_TH21(gw_obs_dl[i],mu=dltrial,sigma=sigma_dl*dltrial)*pzeval
             # Do the integral of the numerator in redshift
-            numerator = scipy.integrate.simpson(integrand,z_array)
+            numerator = scipy.integrate.simpson(integrand,zinterpo.x)
             posterior_matrix[i,j]=numerator/selection_bias[j]
-
+            
     # Combine the result
     combined=np.ones_like(H0_array)
     for i,idx in enumerate(gw_obs_dl):
@@ -476,79 +485,6 @@ def galaxy_catalog_analysis_onegal_withuncert(H0_array,zobs,z_uncert,gw_obs_dl,s
         combined/=scipy.integrate.simpson(combined,H0_array)
 
     return posterior_matrix,combined
-
-def galaxy_catalog_analysis_onegal_withuncert_full(H0_array,zobs,z_uncert,gw_obs_dl,sigma_dl,dl_thr,ret_post):
-    '''
-    This carries out an analysis with a single galaxy in the catalogue using 
-    the full likelihood.
-    
-    Parameters
-    ---------
-    H0_array: grid of H0 for the analysis
-    zobs: observed redshift of single galaxy
-    z_uncert: fractional uncertainty in redshift measurement, zval ~ N(z_true, z_uncert*z_true)
-    gw_obs_dl: Array containing observed values for the GW luminosity distance in Mpc
-    sigma_dl: Array of sigma for dl (in Mpc) used to draw gw_obs_dl
-    dl_thr: Threshold for detection in Mpc
-    ret_post: flag to indicate individual event posteriors should also be returned.
-    
-    Returns
-    -------
-    Posterior matrix (raws events, columns H0) [if ret_post = TRUE] and combined posterior
-    '''
-
-    cosmotrial=FlatLambdaCDM(H0=70.,Om0=0.25)
-    posterior_matrix = np.ones([len(gw_obs_dl),len(H0_array)])
-    # Evaluate d_L times H0
-    zmin=zobs/(1.+5.*z_uncert)
-    if (zmin < 0.):
-        zmin=0.
-    zmax=zobs/(1.-5.*z_uncert)
-    z_array=np.linspace(zmin,zmax,1000)
-    dltimesH0=cosmotrial.luminosity_distance(z_array).to('Mpc').value*cosmotrial.H0.value
-    # compute selection function, which is a function of both H0 and z, the
-    # latter interpreted as the true (unknown) redshift of the host galaxy.
-    selection_bias=np.zeros([len(H0_array),len(z_array)])
-    # Note that there is a normalisation here which we are ignoring because 
-    # it is a constant factor when we have only one galaxy
-    pzeval=(z_array**2)*np.exp(-0.5*((z_array-zobs)**2)/((z_array*z_uncert)**2))
-
-    # Calculate the selection effect on the grid just once
-    for j,H0 in tqdm(enumerate(H0_array)):
-        dltrial=dltimesH0/H0
-        selection_bias[j,:]=GW_detection_probability(dltrial,sigmadl=sigma_dl*dltrial,dlthr=dl_thr)
-
-    # Loop on the GW events and H0 to compute individual event posteriors, if requested.
-    if (ret_post):
-        for i,idx in tqdm(enumerate(gw_obs_dl),desc='Running on GW events'):
-            for j,H0 in enumerate(H0_array):
-                dltrial=dltimesH0/H0
-                integrand=normal_distribution(gw_obs_dl[i],mu=dltrial,sigma=sigma_dl*dltrial)*pzeval
-                # Do the integral over redshift
-                posterior_matrix[i,j]= scipy.integrate.simpson(integrand/selection_bias[j,:],z_array)
-        for i,idx in enumerate(gw_obs_dl):
-            posterior_matrix[i,:]/=scipy.integrate.simpson(posterior_matrix[i,:],H0_array)
-
-    # Combined result computed differently in this case
-    Ngw=len(gw_obs_dl)
-    datsum=np.sum(gw_obs_dl)
-    datsumsq=np.sum(gw_obs_dl*gw_obs_dl)
-    log_combined=np.zeros_like(H0_array)
-    for j,H0 in enumerate(H0_array):
-            dltrial=dltimesH0/H0
-            log_integrand=-0.5*(datsumsq/(dltrial**2)-2.*datsum/dltrial+Ngw)/(sigma_dl**2)
-            integrand=np.exp(log_integrand+np.log(pzeval)+Ngw*(4.-np.log(dltrial)-np.log(selection_bias[j,:])))
-            # Do the integral over redshift
-            numerator = scipy.integrate.simpson(integrand,z_array)
-            log_combined[j]=np.log(numerator)
-    combined=np.exp(log_combined-np.max(log_combined))
-    combined/=scipy.integrate.simpson(combined,H0_array)
-
-    if (ret_post):
-        return posterior_matrix,combined
-    else:
-        return combined
-
                 
                 
 
