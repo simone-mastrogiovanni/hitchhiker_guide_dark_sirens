@@ -18,6 +18,4 @@ To run the notebooks you will need a working copy of Python3 with standard packa
 
 * `H0analysis_OneGal.ipynb`: Do the analysis with the full-likelihood formalism, in the case that there are multiple GW events in the same galaxies.
 
-* `H0analysis_TH21.ipynb`: Do the analysis exploring some of the possible inconsistencies in TH21.
-
-* `H0analysis_TH21_4inconsistencies.ipynb`: Do the analysis exploring some of the possible inconsistencies in TH21.
+* `H0analysis_4inconsistencies.ipynb`: Do the analysis exploring some of the possible inconsistencies when generating mock data and using the catalog statistical method.
